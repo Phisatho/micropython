@@ -4,6 +4,7 @@
  * The MIT License (MIT)
  *
  * Copyright (c) 2021-2022 Damien P. George
+ * Copyright (c) 2022 David Lechner <david@pybricks.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,32 +46,6 @@ void board_init(void) {
     // Enable RX/TX buffer
     mp_hal_pin_output(pyb_pin_PORTB_EN);
     mp_hal_pin_low(pyb_pin_PORTB_EN);
-
-    // Port C
-    // Enable RX/TX buffer
-    mp_hal_pin_output(pyb_pin_PORTC_EN);
-    mp_hal_pin_low(pyb_pin_PORTC_EN);
-
-    // Port D
-    // Enable RX/TX buffer
-    mp_hal_pin_output(pyb_pin_PORTD_EN);
-    mp_hal_pin_low(pyb_pin_PORTD_EN);
-
-    // Port E
-    // Enable RX/TX buffer
-    mp_hal_pin_output(pyb_pin_PORTE_EN);
-    mp_hal_pin_low(pyb_pin_PORTE_EN);
-    // Disable RS485 driver
-    mp_hal_pin_output(pyb_pin_PORTE_RTS);
-    mp_hal_pin_low(pyb_pin_PORTE_RTS);
-
-    // Port F
-    // Enable RX/TX buffer
-    mp_hal_pin_output(pyb_pin_PORTF_EN);
-    mp_hal_pin_low(pyb_pin_PORTF_EN);
-    // Disable RS485 driver
-    mp_hal_pin_output(pyb_pin_PORTF_RTS);
-    mp_hal_pin_low(pyb_pin_PORTF_RTS);
 }
 
 #if BUILDING_MBOOT
@@ -84,11 +59,6 @@ void board_init(void) {
 #define RESET_MODE_NUM_STATES (4)
 #define RESET_MODE_TIMEOUT_CYCLES (8)
 
-#define PATTERN_B (0x00651946)
-#define PATTERN_F (0x0021184e)
-#define PATTERN_N (0x01296ad2)
-#define PATTERN_S (0x0064104c)
-
 // Location and value for the SPI flash update key.  If this key exists at the defined
 // location then mboot will attempt to do a filesystem-load update of the main firmware.
 // This makes the update robust to power failures: if the update does not complete then
@@ -98,28 +68,57 @@ void board_init(void) {
 #define SPIFLASH_UPDATE_KEY_VALUE (0x12345678)
 
 static void board_led_pattern(int reset_mode, uint16_t brightness) {
-    static const uint32_t pixels[] = {
-        0,
-        PATTERN_N,
-        PATTERN_S,
-        PATTERN_F,
-        PATTERN_B,
-    };
-    uint32_t pixel = pixels[reset_mode];
-    for (int i = 0; i < 25; ++i) {
-        hub_display_set(i, brightness * ((pixel >> i) & 1));
+    switch (reset_mode) {
+        case BOARDCTRL_RESET_MODE_NORMAL:
+            // set status light to red
+            hub_display_set(3, brightness);
+            hub_display_set(4, 0);
+            hub_display_set(5, 0);
+            break;
+        case BOARDCTRL_RESET_MODE_SAFE_MODE:
+            // set status light to green
+            hub_display_set(3, 0);
+            hub_display_set(4, brightness);
+            hub_display_set(5, 0);
+            break;
+        case BOARDCTRL_RESET_MODE_FACTORY_FILESYSTEM:
+            // set status light to blue
+            hub_display_set(3, 0);
+            hub_display_set(4, 0);
+            hub_display_set(5, brightness);
+            break;
+        case BOARDCTRL_RESET_MODE_BOOTLOADER:
+            // set status light to white
+            hub_display_set(3, brightness);
+            hub_display_set(4, brightness);
+            hub_display_set(5, brightness);
+            break;
     }
+
     hub_display_update();
 }
 
-static void board_button_init(void) {
-    mp_hal_pin_config(pyb_pin_BUTTONS_ADC, MP_HAL_PIN_MODE_ADC, MP_HAL_PIN_PULL_NONE, 0);
+static void board_battery_init(void) {
+    mp_hal_pin_config(pyb_pin_BAT_VMON_ADC, MP_HAL_PIN_MODE_ADC, MP_HAL_PIN_PULL_NONE, 0);
     adc_config(ADC1, 12);
 }
 
+// returns true if the battery is pressed, otherwise false
+static int board_battery_state(void) {
+    uint16_t value = adc_config_and_read_u16(ADC1, 6, ADC_SAMPLETIME_15CYCLES);
+    // If battery voltage is above USB voltage, then we consider the battery
+    // to be present.
+    return value > 41100; // 41100 is approx 5.5V
+}
+
+static void board_button_init(void) {
+    mp_hal_pin_input(pyb_pin_BUTTON);
+}
+
+// returns true if the button is pressed, otherwise false
 static int board_button_state(void) {
-    uint16_t value = adc_config_and_read_u16(ADC1, 1, ADC_SAMPLETIME_15CYCLES);
-    return value < 44000;
+    // button is active low
+    return !mp_hal_pin_read(pyb_pin_BUTTON);
 }
 
 void board_mboot_cleanup(int reset_mode) {
@@ -133,46 +132,22 @@ void board_mboot_led_init(void) {
 
 void board_mboot_led_state(int led, int state) {
     if (state) {
-        hub_display_set(28 + led, 0x7fff);
-        hub_display_set(31 + led, 0x7fff);
+        hub_display_set(3 + led, 0x7fff);
     } else {
-        hub_display_set(28 + led, 0);
-        hub_display_set(31 + led, 0);
+        hub_display_set(3 + led, 0);
     }
+
     hub_display_update();
 }
 
 int board_mboot_get_reset_mode(uint32_t *initial_r0) {
+    board_battery_init();
     board_button_init();
     int reset_mode = BOARDCTRL_RESET_MODE_NORMAL;
-    if (board_button_state()) {
-        // Cycle through reset modes while USR is held.
-        // Timeout is roughly 20s, where reset_mode=1.
-        systick_init();
-        hub_display_on();
-        reset_mode = 0;
-        for (int i = 0; i < (RESET_MODE_NUM_STATES * RESET_MODE_TIMEOUT_CYCLES + 1) * 32; i++) {
-            if (i % 32 == 0) {
-                if (++reset_mode > RESET_MODE_NUM_STATES) {
-                    reset_mode = BOARDCTRL_RESET_MODE_NORMAL;
-                }
-                board_led_pattern(reset_mode, 0x7fff);
-            }
-            if (!board_button_state()) {
-                break;
-            }
-            mp_hal_delay_ms(19);
-        }
-        // Flash the selected reset mode.
-        for (int i = 0; i < 6; i++) {
-            board_led_pattern(reset_mode, 0x0fff);
-            mp_hal_delay_ms(50);
-            board_led_pattern(reset_mode, 0x7fff);
-            mp_hal_delay_ms(50);
-        }
-        mp_hal_delay_ms(300);
-    } else {
-        // Button not pressed, check flash for update key and start an update if the key exists.
+
+    if (board_battery_state()) {
+        // Battery is present, check flash for update key and start an update if the key exists.
+        // Otherwise, boot normally.
 
         // Initialise the external SPI flash.
         MBOOT_SPIFLASH_SPIFLASH->config = MBOOT_SPIFLASH_CONFIG;
@@ -188,7 +163,37 @@ int board_mboot_get_reset_mode(uint32_t *initial_r0) {
             *initial_r0 = MBOOT_INITIAL_R0_KEY_FSLOAD;
             reset_mode = BOARDCTRL_RESET_MODE_BOOTLOADER;
         }
+    } else {
+        // Battery is not present. Cycle through reset modes until button is pressed.
+        systick_init();
+        hub_display_on();
+        reset_mode = 0;
+        for (int i = 0; i < (RESET_MODE_NUM_STATES * RESET_MODE_TIMEOUT_CYCLES + 1) * 64; i++) {
+            if (i % 64 == 0) {
+                if (++reset_mode > RESET_MODE_NUM_STATES) {
+                    reset_mode = BOARDCTRL_RESET_MODE_NORMAL;
+                }
+                board_led_pattern(reset_mode, 0x7fff);
+            }
+
+            if (board_button_state()) {
+                break;
+            }
+
+            mp_hal_delay_ms(19);
+        }
+
+        // Flash the selected reset mode.
+        for (int i = 0; i < 6; i++) {
+            board_led_pattern(reset_mode, 0x0fff);
+            mp_hal_delay_ms(50);
+            board_led_pattern(reset_mode, 0x7fff);
+            mp_hal_delay_ms(50);
+        }
+
+        mp_hal_delay_ms(300);
     }
+
     board_led_pattern(0, 0);
     return reset_mode;
 }
@@ -200,6 +205,7 @@ void board_mboot_state_change(int state, uint32_t arg) {
         mp_spiflash_erase_block(MBOOT_SPIFLASH_SPIFLASH, SPIFLASH_UPDATE_KEY_ADDR);
         mp_spiflash_write(MBOOT_SPIFLASH_SPIFLASH, SPIFLASH_UPDATE_KEY_ADDR + 4, 4, (const uint8_t *)&arg);
     }
+
     mboot_state_change_default(state, arg);
 }
 

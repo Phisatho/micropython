@@ -1,11 +1,9 @@
-LEGO Hub No.6
+LEGO Hub No.7
 =============
 
-This board definition is for the LEGO Hub No. 6, a LEGO control unit with a 5x5
-LED display, 6 Powered Up ports, speaker, 6-DOF sensor, Bluetooth, external SPI
-flash storage, and a rechargeable battery.  The Hub can work without the battery if
-it is plugged in to, and powered by, its USB port.  But without the battery the LEDs
-and power on the Powered Up ports will not function.
+This board definition is for the LEGO Hub No. 7, a LEGO control unit with 1 button,
+2 RGB LEDs, 2 Powered Up ports, 6-DOF sensor, Bluetooth, USB, 4MiB external SPI
+flash storage, and a rechargeable battery.
 
 Features that are currently supported:
 - standard MicroPython
@@ -14,36 +12,36 @@ Features that are currently supported:
 - USB VCP, MSC and HID
 
 The Hub has a bootloader preinstalled at 0x08000000 (which is 32kiB in size) which
-cannot be erased.  This bootloader is entered by holding down the Bluetooth button,
-plugging in USB to power it up, then releasing the Bluetooth button after 5 seconds,
+cannot be erased.  This bootloader is entered by holding down the button for 5 seconds,
 at which point the USB DFU device appears.  If the battery is installed then the
-Bluetooth button's RGB LED will cycle colours.  When this bootloader is active, the
-flash from 0x08008000 and up can be erased and programmed via USB DFU.
+RGB LED will flash purple. If the battery is not installed, the LED will flash orange
+briefly and then the hub will turn off (so having the battery installed is required).
+When this bootloader is active, the flash from 0x08008000 and up can be erased
+and programmed via USB DFU.
 
 The built-in bootloader has some drawbacks: it cannot be entered programmatically,
 and it does not keep the Hub powered up when running from battery (which requires
 keeping BAT_PWR_EN high).  As such, this board is configured to work with mboot as
 a secondary bootloader: mboot is placed at 0x08008000 and the main application
 firmware at 0x08010000.  When mboot is installed it can be entered programatically
-via machine.bootloader(), or by holding down the left arrow button when powering
-on the Hub and waiting until the display says "B" before releasing the button.
+via machine.bootloader().
 
 Backing up original Hub firmware
 --------------------------------
 
-Before install MicroPython it is advised to backup the original LEGO firmware that
+Before installing MicroPython it is advised to backup the original LEGO firmware that
 the Hub comes installed with.  To do this, enter the built-in bootloader by holding
-down the Bluetooth button for 5 seconds while powering up the Hub via USB (you may
+down the power button for 5 seconds while powering up the Hub via USB (you may
 need to take out the battery and disconnect USB to power off the Hub first).  Then
 run the following command from the root of this repository:
 
     $ cd ports/stm32
-    $ make BOARD=LEGO_HUB_NO6 backup-hub-firmware
+    $ make BOARD=LEGO_HUB_NO7 backup-hub-firmware
 
 This will create a file called `lego_hub_firmware.dfu`.  Put this file in a safe
 location.  To restore it, enter the built-in bootloader again and run:
 
-    $ make BOARD=LEGO_HUB_NO6 restore-hub-firmware
+    $ make BOARD=LEGO_HUB_NO7 restore-hub-firmware
 
 This will restore the original firmware but not the filesystem.  To recreate the
 original filesystem the Hub must be updated using the appropriate LEGO PC
@@ -56,18 +54,25 @@ You first need to build and install mboot, which only needs to be done once.  Fr
 the root of this repository run:
 
     $ cd ports/stm32/mboot
-    $ make BOARD=LEGO_HUB_NO6
+    $ make BOARD=LEGO_HUB_NO7
 
-Now enter the built-in bootloader by holding down the Bluetooth button for 5
+Now enter the built-in bootloader by holding down the power button for 5
 seconds while powering up the Hub via USB (you may need to take out the battery
 and disconnect USB to power off the Hub first).  Then run:
 
-    $ make BOARD=LEGO_HUB_NO6 deploy
+    $ make BOARD=LEGO_HUB_NO7 deploy
 
-mboot should now be installed.  Enter mboot by holding down the left arrow
-button when powering up the Hub.  The display will cycle the letters: N, S, F, B.
-When it gets to "B" release the left arrow and it will start mboot.  The Hub then
-blinks the centre button red once per second, and appears as a USB DFU device.
+mboot should now be installed.  To enter mboot, remove USB and the battery.
+Connect the USB cable (the other end of the USB cable must be connected to
+something that provides power). The status light should start cycling through
+different colors. Replace the battery (the button will not work without the
+battery present). Press the button to activate the desired boot mode:
+
+- Status light is red - run application (normal boot).
+- Status light is green - run application in factory file system mode.
+- Status light is blue - run application in safe mode.
+- Status light is white - start DFU on the USB port.
+
 
 Now build MicroPython (start at the root of this repository):
 
@@ -75,12 +80,12 @@ Now build MicroPython (start at the root of this repository):
     $ make
     $ cd ../ports/stm32
     $ make submodules
-    $ make BOARD=LEGO_HUB_NO6
+    $ make BOARD=LEGO_HUB_NO7
 
-And deploy to the Hub (making sure mboot is active, the centre button is blinking
-red):
+And deploy to the Hub (making sure mboot DFU is active, the center button is
+blinking red):
 
-    $ make BOARD=LEGO_HUB_NO6 deploy
+    $ make BOARD=LEGO_HUB_NO7 deploy
 
 If successful, the Hub should now appear as a USB serial and mass storage device.
 
@@ -111,9 +116,9 @@ filesystem.
 To use this feature, build the firmware (see above for details) then gzip it and
 copy the resulting file to the Hub (eg using mpremote):
 
-    $ make BOARD=LEGO_HUB_NO6
-    $ gzip build-LEGO_HUB_NO6/firmware.dfu
-    $ mpremote cp build-LEGO_HUB_NO6/firmware.dfu.gz :
+    $ make BOARD=LEGO_HUB_NO7
+    $ gzip build-LEGO_HUB_NO7/firmware.dfu
+    $ mpremote cp build-LEGO_HUB_NO7/firmware.dfu.gz :
 
 Then get a REPL on the Hub and execute:
 
